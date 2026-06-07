@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Data (local)
+data/
+smart_doctor/data/
+smart_doctor/app/data/
+
+# Chroma vector store
+smart_doctor/data/chroma/
+
+# Node
+node_modules/
+frontend/node_modules/
+smart_doctor/frontend/node_modules/
+frontend/dist/
+smart_doctor/frontend/dist/
+
+# Build output
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+test_screenshots/
+
+# Trae
+.trae/
+
+# Temporary
+*.tmp
+*.bak
