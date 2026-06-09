@@ -117,6 +117,16 @@ class CrossEncoderReranker:
             logger.warning("CrossEncoder load failed: %s, switching to TF-IDF", e)
             self._use_fallback = True
 
+    def preload(self) -> None:
+        """预加载模型（可在应用启动时调用，避免首次请求阻塞）"""
+        if not self._load_attempted:
+            logger.info("Preloading CrossEncoder reranker model...")
+            self._try_load_model()
+            if self._model is not None:
+                logger.info("CrossEncoder reranker preloaded successfully")
+            else:
+                logger.info("CrossEncoder reranker preload skipped, will use TF-IDF fallback")
+
     async def _rerank_with_model(
         self, query: str, candidates: list[dict], top_k: int,
     ) -> list[dict]:

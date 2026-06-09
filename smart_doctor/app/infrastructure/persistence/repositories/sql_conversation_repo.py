@@ -67,6 +67,9 @@ class SqlConversationRepository:
         )
 
     async def add_message(self, message: MessageEntity) -> MessageEntity:
+        # 显式设置 created_at，避免 server_default=func.now() 在同一事务中
+        # 返回相同时间戳导致消息排序不稳定
+        now = message.created_at or datetime.now(timezone.utc)
         model = MessageModel(
             id=message.id,
             conversation_id=message.conversation_id,
@@ -77,6 +80,7 @@ class SqlConversationRepository:
             tool_calls=message.tool_calls,
             metadata=message.extra_metadata,
             disclaimer_shown=message.disclaimer_shown,
+            created_at=now,
         )
         self._session.add(model)
         await self._session.flush()
@@ -84,9 +88,10 @@ class SqlConversationRepository:
 
     async def get_messages(self, conversation_id: uuid.UUID,
                            limit: int = 100, offset: int = 0) -> list[MessageEntity]:
+        # created_at 相同时，user 排在 assistant 之前（role desc: user > assistant）
         stmt = (select(MessageModel)
                 .where(MessageModel.conversation_id == conversation_id)
-                .order_by(MessageModel.created_at.asc())
+                .order_by(MessageModel.created_at.asc(), MessageModel.role.desc())
                 .offset(offset)
                 .limit(limit))
         result = await self._session.execute(stmt)

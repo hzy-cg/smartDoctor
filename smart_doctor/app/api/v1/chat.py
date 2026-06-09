@@ -66,18 +66,24 @@ async def _restore_session_state(conversation_id: str, conv_repo, conv):
     return sm, cs
 
 
+_agent_factory = None
+_reranker_instance = None  # 全局单例，与 lifespan 预加载共享
+
+
 def _get_factory():
-    global _agent_factory
+    global _agent_factory, _reranker_instance
     if _agent_factory is None:
         llm = create_llm()
         try:
             chroma_store = ChromaVectorStore()
-            reranker = CrossEncoderReranker()  # v2.2: 懒加载，失败时自动降级TF-IDF
+            # 复用全局 reranker 单例（lifespan 中已预加载模型）
+            if _reranker_instance is None:
+                _reranker_instance = CrossEncoderReranker()
             rag_strategy = RAGStrategy(
                 private_store=chroma_store,
                 common_store=chroma_store,
                 embedding=None,
-                reranker=reranker,
+                reranker=_reranker_instance,
             )
         except Exception as e:
             logger.warning("RAG initialization failed: %s, proceeding without RAG", e)

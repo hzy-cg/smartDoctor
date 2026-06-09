@@ -214,10 +214,15 @@ watch(() => chatStore.loading, (loading, wasLoading) => {
   }
 });
 
-onMounted(() => {
-  chatStore.fetchConversations();
+onMounted(async () => {
+  await chatStore.fetchConversations();
+  // 刷新后恢复：如果没有当前对话但有历史对话，自动选中最近的一个
+  if (!chatStore.currentConversationId && chatStore.conversations.length > 0) {
+    chatStore.currentConversationId = chatStore.conversations[0].id;
+  }
   if (chatStore.currentConversationId) {
-    chatStore.fetchMessages(chatStore.currentConversationId).then(() => scrollEnd());
+    await chatStore.fetchMessages(chatStore.currentConversationId);
+    scrollEnd();
   }
 });
 

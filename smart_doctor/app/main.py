@@ -13,6 +13,26 @@ from app.infrastructure.persistence.database import engine
 logger = logging.getLogger(__name__)
 
 
+def _preload_models():
+    """在后台线程预加载 Reranker 模型，避免首次请求阻塞"""
+    import threading
+
+    def _load():
+        try:
+            from app.domain.services.reranker import CrossEncoderReranker
+            reranker = CrossEncoderReranker()
+            reranker.preload()
+            # 存入 chat 模块的全局变量，与 _get_factory 共享实例
+            from app.api.v1 import chat
+            chat._reranker_instance = reranker
+        except Exception as e:
+            logger.warning("Reranker preload failed: %s (will use TF-IDF fallback)", e)
+
+    t = threading.Thread(target=_load, daemon=True)
+    t.start()
+    logger.info("Reranker model preloading started in background")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -21,6 +41,9 @@ async def lifespan(app: FastAPI):
         logger.info("Database connection verified on startup")
     except Exception as e:
         logger.warning("Database connection check failed on startup: %s", e)
+
+    # 后台预加载 Reranker 模型，不阻塞启动
+    _preload_models()
 
     yield
 
