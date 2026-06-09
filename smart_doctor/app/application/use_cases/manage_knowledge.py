@@ -76,6 +76,12 @@ async def upload_knowledge(
         version=1,
         status="uploading",
         collection_name=collection_name,
+        # v2.1 解析元数据
+        file_size=parsed_meta.get("file_size", 0),
+        encoding=parsed_meta.get("encoding"),
+        parse_method=parsed_meta.get("parse_method"),
+        page_count=parsed_meta.get("page_count"),
+        parse_duration_ms=parsed_meta.get("parse_duration_ms"),
     )
     saved = await doc_repo.save(entity)
 
@@ -90,8 +96,8 @@ async def upload_knowledge(
             ids=chunk_ids,
         )
 
-    # 更新状态：直接修改已跟踪的实体，无需重新 save
-    saved.status = "active"
+    # 更新状态：通过仓储层更新 ORM 模型
+    await doc_repo.update_status(doc_id, "active")
     await doc_repo.flush()
 
     logger.info(

@@ -79,8 +79,10 @@ async def write_chunk(
     session: AsyncSession,
 ) -> UploadSession:
     """将分片写入临时文件指定偏移位置"""
+    # FOR UPDATE: 行级锁防止并发分片写入时的 "读-改-写" 竞态条件
+    # 确保同一 upload_id 的并发 chunk 请求串行更新 received_chunk_map
     result = await session.execute(
-        select(UploadSession).where(UploadSession.id == upload_id)
+        select(UploadSession).where(UploadSession.id == upload_id).with_for_update()
     )
     model = result.scalar_one_or_none()
     if not model:
@@ -93,6 +95,22 @@ async def write_chunk(
         raise ValueError(
             f"Chunk index {chunk_index} out of range [0, {model.total_chunks - 1}]"
         )
+
+    # 解析已接收的分片索引集合，用于去重
+    received_set: set[int] = set()
+    if model.received_chunk_map:
+        try:
+            received_set = {int(x) for x in model.received_chunk_map.split(",") if x.strip()}
+        except ValueError:
+            received_set = set()
+
+    # 去重：相同分片重复上传时直接跳过（幂等）
+    if chunk_index in received_set:
+        logger.debug(
+            "Chunk already received (idempotent): upload_id=%s chunk=%d",
+            upload_id, chunk_index,
+        )
+        return model
 
     # 偏移写入临时文件
     offset = chunk_index * model.chunk_size
@@ -110,7 +128,10 @@ async def write_chunk(
         f.seek(offset)
         f.write(chunk_data)
 
-    model.received_chunks += 1
+    # 记录分片接收 + 更新去重映射
+    received_set.add(chunk_index)
+    model.received_chunk_map = ",".join(str(i) for i in sorted(received_set))
+    model.received_chunks = len(received_set)
     model.status = "uploading"
     await session.flush()
     await session.refresh(model)
@@ -127,17 +148,27 @@ async def complete_upload(
     session: AsyncSession,
 ) -> UploadSession:
     """标记上传完成，校验完整性"""
+    # FOR UPDATE: 防止与并发 chunk 写入产生竞态
     result = await session.execute(
-        select(UploadSession).where(UploadSession.id == upload_id)
+        select(UploadSession).where(UploadSession.id == upload_id).with_for_update()
     )
     model = result.scalar_one_or_none()
     if not model:
         raise ValueError(f"Upload session not found: {upload_id}")
 
     if model.received_chunks != model.total_chunks:
-        missing = model.total_chunks - model.received_chunks
+        # 解析已接收的分片索引，找出具体缺失项
+        received_set: set[int] = set()
+        if model.received_chunk_map:
+            try:
+                received_set = {int(x) for x in model.received_chunk_map.split(",") if x.strip()}
+            except ValueError:
+                pass
+        missing = [i for i in range(model.total_chunks) if i not in received_set]
         raise ValueError(
-            f"Upload incomplete: {missing} chunk(s) missing ({model.received_chunks}/{model.total_chunks})"
+            f"Upload incomplete: {len(missing)} chunk(s) missing "
+            f"({model.received_chunks}/{model.total_chunks}). "
+            f"Missing indices: {missing[:5]}{'...' if len(missing) > 5 else ''}"
         )
 
     # 校验文件完整性（对比文件大小）

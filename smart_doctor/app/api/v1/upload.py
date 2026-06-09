@@ -150,15 +150,6 @@ async def upload_complete(
             },
         )
 
-        # Step 4: 更新 knowledge_doc 的解析相关字段
-        entity.file_size = parsed["file_size"]
-        entity.encoding = parsed["encoding"]
-        entity.parse_method = parsed["parse_method"]
-        entity.page_count = parsed["page_count"]
-        entity.parse_duration_ms = parsed["parse_duration_ms"]
-        doc_repo._session = db
-        await doc_repo.flush()
-
         await db.commit()
 
         logger.info(

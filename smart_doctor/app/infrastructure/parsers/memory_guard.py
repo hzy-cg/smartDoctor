@@ -22,6 +22,9 @@ class MemoryGuard:
     """
     解析过程内存监控器。
 
+    监控策略：记录解析前的基线内存，检测解析过程中的增量。
+    只有增量超过阈值时才触发超限，避免因进程基础内存高而误判。
+
     用法:
         guard = MemoryGuard(threshold_mb=300)
         with guard:
@@ -29,20 +32,13 @@ class MemoryGuard:
         if guard.exceeded:
             # 降级处理
             ...
-
-    或手动模式:
-        guard = MemoryGuard(threshold_mb=300)
-        guard.start()
-        try:
-            result = heavy_parsing()
-        finally:
-            guard.stop()
     """
 
     def __init__(self, threshold_mb: float = DEFAULT_MEMORY_THRESHOLD_MB):
         self._threshold_mb = threshold_mb
         self._exceeded = False
         self._peak_mb = 0.0
+        self._baseline_mb = 0.0
         self._monitor_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._pid = os.getpid()
@@ -56,9 +52,10 @@ class MemoryGuard:
         return self._peak_mb
 
     def start(self) -> None:
-        """启动后台内存监控"""
+        """启动后台内存监控，记录基线内存"""
         self._exceeded = False
         self._peak_mb = 0.0
+        self._baseline_mb = self._get_current_memory_mb()
         self._stop_event.clear()
         self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._monitor_thread.start()
@@ -75,11 +72,13 @@ class MemoryGuard:
                 current_mb = self._get_current_memory_mb()
                 if current_mb > self._peak_mb:
                     self._peak_mb = current_mb
-                if current_mb > self._threshold_mb:
+                # 增量检测：当前内存 - 基线内存 > 阈值
+                delta_mb = current_mb - self._baseline_mb
+                if delta_mb > self._threshold_mb:
                     self._exceeded = True
                     logger.warning(
-                        "Memory guard triggered: %.0fMB > %.0fMB threshold",
-                        current_mb, self._threshold_mb,
+                        "Memory guard triggered: delta %.0fMB (current %.0fMB - baseline %.0fMB) > threshold %.0fMB",
+                        delta_mb, current_mb, self._baseline_mb, self._threshold_mb,
                     )
             except Exception:
                 pass

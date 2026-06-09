@@ -29,7 +29,7 @@ class RAGStrategy:
         self._reranker = reranker              # CrossEncoderReranker (v2.2)
 
     def _doctor_collection(self, doctor_id: str) -> str:
-        return f"doctor_{doctor_id}"
+        return f"doctor_{doctor_id}_knowledge"
 
     async def search(self, doctor_id: str, query: str, top_k: int = 5) -> RAGResult:
         # v2.2: 查询改写 — 生成多个检索查询

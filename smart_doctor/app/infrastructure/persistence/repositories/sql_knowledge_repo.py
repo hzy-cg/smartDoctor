@@ -1,9 +1,12 @@
+import logging
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
 from app.infrastructure.persistence.models.knowledge import KnowledgeDoc
 from app.domain.entities import KnowledgeDocEntity
+
+logger = logging.getLogger(__name__)
 
 
 class SqlKnowledgeRepository:
@@ -52,6 +55,16 @@ class SqlKnowledgeRepository:
 
     async def flush(self) -> None:
         await self._session.flush()
+
+    async def update_status(self, doc_id: uuid.UUID, status: str) -> None:
+        stmt = select(KnowledgeDoc).where(KnowledgeDoc.id == doc_id)
+        result = await self._session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if model:
+            model.status = status
+            logger.info("Updated knowledge_doc status: doc_id=%s status=%s", doc_id, status)
+        else:
+            logger.warning("update_status: doc_id=%s not found", doc_id)
 
     async def get_latest_version(self, filename: str) -> KnowledgeDocEntity | None:
         stmt = (select(KnowledgeDoc)

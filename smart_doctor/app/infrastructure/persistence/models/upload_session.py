@@ -21,6 +21,8 @@ class UploadSession(Base):
     chunk_size: Mapped[int] = mapped_column(Integer, default=2 * 1024 * 1024, nullable=False)
     total_chunks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     received_chunks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    received_chunk_map: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    # comma-separated received chunk indices, e.g. "0,1,2,3" — used for deduplication (v2.2 fix)
     status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
     # pending / uploading / completed / failed / cancelled
     temp_file_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)

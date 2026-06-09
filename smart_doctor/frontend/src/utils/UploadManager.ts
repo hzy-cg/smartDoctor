@@ -71,9 +71,9 @@ export class UploadManager {
     this._abortControllers.set(uploadId, abortController);
 
     try {
-      // Step 2: 并发上传分片
+      // Step 2: 并发上传分片（使用服务端返回的 total_chunks，避免与本地计算不一致）
       await this._uploadChunks(
-        file, uploadId, totalChunks, progress, onProgress, abortController.signal
+        file, uploadId, totalChunksFromServer, progress, onProgress, abortController.signal
       );
 
       // Step 3: 完成上传
@@ -112,12 +112,6 @@ export class UploadManager {
     onProgress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<void> {
-    const pending: number[] = [];
-    for (let i = 0; i < totalChunks; i++) {
-      pending.push(i);
-    }
-
-    let activeCount = 0;
     const errors: string[] = [];
 
     const uploadOne = async (chunkIndex: number): Promise<void> => {
@@ -132,6 +126,7 @@ export class UploadManager {
 
       // 重试 3 次
       for (let attempt = 0; attempt < 3; attempt++) {
+        if (signal?.aborted) return;
         try {
           await api.post(
             `/knowledge/upload/${uploadId}/chunk/${chunkIndex}`,
@@ -149,10 +144,9 @@ export class UploadManager {
           onProgress?.({ ...progress });
           return;
         } catch (err: any) {
-          if (err.name === "AbortError") throw err;
+          if (err.name === "AbortError") return;
           if (attempt === 2) {
-            errors.push(`分片 ${chunkIndex} 上传失败`);
-            throw new Error(errors.join("; "));
+            errors.push(`分片 ${chunkIndex} 上传失败: ${err.response?.data?.detail || err.message}`);
           }
           // 指数退避重试
           await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
@@ -160,33 +154,33 @@ export class UploadManager {
       }
     };
 
-    return new Promise<void>((resolve, reject) => {
-      const runNext = () => {
-        if (signal?.aborted) {
-          reject(new Error("Upload cancelled"));
-          return;
-        }
+    // 并发池：最多 MAX_CONCURRENT 个同时上传
+    const queue = Array.from({ length: totalChunks }, (_, i) => i);
+    const executing: Promise<void>[] = [];
 
-        while (activeCount < MAX_CONCURRENT && pending.length > 0) {
-          const idx = pending.shift()!;
-          activeCount++;
-          uploadOne(idx)
-            .then(() => {
-              activeCount--;
-              if (pending.length === 0 && activeCount === 0) {
-                resolve();
-              } else {
-                runNext();
-              }
-            })
-            .catch((err) => {
-              reject(err);
-            });
-        }
-      };
+    for (const chunkIndex of queue) {
+      if (signal?.aborted) break;
 
-      runNext();
-    });
+      const p = uploadOne(chunkIndex).then(() => {
+        executing.splice(executing.indexOf(p), 1);
+      });
+      executing.push(p);
+
+      if (executing.length >= MAX_CONCURRENT) {
+        await Promise.race(executing);
+      }
+    }
+
+    // 等待剩余分片完成
+    await Promise.all(executing);
+
+    if (signal?.aborted) {
+      throw new Error("Upload cancelled");
+    }
+
+    if (errors.length > 0) {
+      throw new Error(errors.join("; "));
+    }
   }
 
   /**
